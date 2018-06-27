@@ -1033,6 +1033,7 @@ IP_BUFFER_SIZE = 2048
 
 # database defaults
 DB_HOST = 'localhost'
+DB_PORT = 3306
 DB_USER = 'ecmuser'
 DB_PASSWD = 'ecmpass'
 DB_DATABASE = 'ecm'
@@ -2807,19 +2808,21 @@ class DatabaseProcessor(BaseProcessor):
 
 
 class MySQLClient(object):
-    def __init__(self, host, user, passwd, database, table):
+    def __init__(self, host, port, user, passwd, database, table):
         if not MySQLdb:
             print 'MySQL Error: MySQLdb module could not be imported.'
             sys.exit(1)
 
         self.conn = None
         self.db_host = host
+        self.db_port = int(port)
         self.db_user = user
         self.db_passwd = passwd
         self.db_database = database
         self.db_table = self.db_database + '.' + table
 
         infmsg('MYSQL: host: %s' % self.db_host)
+        infmsg('MYSQL: port: %s' % self.db_port)
         infmsg('MYSQL: username: %s' % self.db_user)
         infmsg('MYSQL: database: %s' % self.db_database)
         infmsg('MYSQL: table: %s' % self.db_table)
@@ -2827,6 +2830,7 @@ class MySQLClient(object):
     def _open_connection(self):
         dbgmsg('MYSQL: opening connection to %s' % self.db_host)
         self.conn = MySQLdb.connect(host=self.db_host,
+        							port=self.db_port,
                                     user=self.db_user,
                                     passwd=self.db_passwd,
                                     db=self.db_database)
@@ -2844,16 +2848,16 @@ class MySQLClient(object):
         self._close_connection()
 
 class MySQLProcessor(DatabaseProcessor, MySQLClient):
-    def __init__(self, host, user, passwd, database, table, period,
+    def __init__(self, host, port, user, passwd, database, table, period,
                  persistent_connection=False):
         DatabaseProcessor.__init__(self, table, period)
-        MySQLClient.__init__(self, host, user, passwd, database, table)
+        MySQLClient.__init__(self, host, port, user, passwd, database, table)
         self._tbl = table
         self._persistent_connection = persistent_connection
         infmsg('MYSQL: process_period: %d' % self.process_period)
 
     def setup(self):
-        cfg = MySQLConfigurator(self.db_host, self.db_user, self.db_passwd, self.db_database, self._tbl)
+        cfg = MySQLConfigurator(self.db_host, self.db_port, self.db_user, self.db_passwd, self.db_database, self._tbl)
         cfg.configure()
         if self._persistent_connection:
             MySQLClient.setup(self)
@@ -2879,12 +2883,13 @@ class MySQLProcessor(DatabaseProcessor, MySQLClient):
 
 
 class MySQLConfigurator(MySQLClient):
-    def __init__(self, host, user, passwd, database, table):
-        MySQLClient.__init__(self, host, user, passwd, database, table)
+    def __init__(self, host, port, user, passwd, database, table):
+        MySQLClient.__init__(self, host, port, user, passwd, database, table)
 
     def setup(self):
         dbgmsg('MYSQL: opening connection to %s' % self.db_host)
         self.conn = MySQLdb.connect(host=self.db_host,
+        							port=self.db_port,
                                     user=self.db_user,
                                     passwd=self.db_passwd)
 
@@ -4193,6 +4198,7 @@ if __name__ == '__main__':
     group = optparse.OptionGroup(parser, 'mysql source options')
     group.add_option('--mysql-src', action='store_true', dest='mysql_read', default=False, help='read from mysql database')
     group.add_option('--mysql-src-host', help='source database host', metavar='HOSTNAME')
+    group.add_option('--mysql-src-port', help='source database port', metavar='PORT')
     group.add_option('--mysql-src-user', help='source database user', metavar='USERNAME')
     group.add_option('--mysql-src-passwd', help='source database password', metavar='PASSWORD')
     group.add_option('--mysql-src-database', help='source database name', metavar='DATABASE')
@@ -4217,6 +4223,7 @@ if __name__ == '__main__':
     group = optparse.OptionGroup(parser, 'mysql options')
     group.add_option('--mysql', action='store_true', dest='mysql_out', default=False, help='write data to mysql database')
     group.add_option('--mysql-host', help='database host', metavar='HOSTNAME')
+    group.add_option('--mysql-port', help='database port', metavar='PORT')
     group.add_option('--mysql-user', help='database user', metavar='USERNAME')
     group.add_option('--mysql-passwd', help='database password', metavar='PASSWORD')
     group.add_option('--mysql-database', help='database name', metavar='DATABASE')
@@ -4489,10 +4496,12 @@ if __name__ == '__main__':
     # run the database configurator then exit
     if options.mysql_config:
         db = MySQLConfigurator(options.mysql_host or DB_HOST,
+        					   options.mysql_port or DB_PORT,
                                options.mysql_user or DB_USER,
                                options.mysql_passwd or DB_PASSWD,
                                options.mysql_database or DB_DATABASE,
                                options.mysql_table or dbtable)
+        infmsg('calling db.configure')
         db.configure()
         sys.exit(0)
     if options.sqlite_config:
@@ -4531,6 +4540,7 @@ if __name__ == '__main__':
 
     elif options.mysql_read:
         col = MySQLCollector(options.mysql_src_host or DB_HOST,
+        					 options.mysql_src_port or DB_PORT,
                              options.mysql_src_user or DB_USER,
                              options.mysql_src_passwd or DB_PASSWD,
                              options.mysql_src_database or DB_DATABASE,
@@ -4591,6 +4601,7 @@ if __name__ == '__main__':
     if options.mysql_out:
         procs.append(MySQLProcessor
                      (options.mysql_host or DB_HOST,
+                      options.mysql_port or DB_PORT,
                       options.mysql_user or DB_USER,
                       options.mysql_passwd or DB_PASSWD,
                       options.mysql_database or DB_DATABASE,
