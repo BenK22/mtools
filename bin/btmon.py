@@ -2832,7 +2832,7 @@ class MySQLClient(object):
     def _open_connection(self):
         dbgmsg('MYSQL: opening connection to %s' % self.db_host)
         self.conn = MySQLdb.connect(host=self.db_host,
-        							port=self.db_port,
+                                    port=self.db_port,
                                     user=self.db_user,
                                     passwd=self.db_passwd,
                                     db=self.db_database)
@@ -2891,7 +2891,7 @@ class MySQLConfigurator(MySQLClient):
     def setup(self):
         dbgmsg('MYSQL: opening connection to %s' % self.db_host)
         self.conn = MySQLdb.connect(host=self.db_host,
-        							port=self.db_port,
+                                    port=self.db_port,
                                     user=self.db_user,
                                     passwd=self.db_passwd)
 
@@ -4542,7 +4542,7 @@ if __name__ == '__main__':
 
     elif options.mysql_read:
         col = MySQLCollector(options.mysql_src_host or DB_HOST,
-        					 options.mysql_src_port or DB_PORT,
+                             options.mysql_src_port or DB_PORT,
                              options.mysql_src_user or DB_USER,
                              options.mysql_src_passwd or DB_PASSWD,
                              options.mysql_src_database or DB_DATABASE,
