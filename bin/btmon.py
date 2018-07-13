@@ -961,6 +961,11 @@ REVERSE_POLARITY = 0
 # enabled in the gem, then enable it here to process the current values.
 INCLUDE_CURRENT = 0
 
+# in the default gem setup with DB_SCHEMA_COUNTERS the calculated channel watts
+# are not included in the database schema/insert.
+# set to 1 to included this calculated column
+INCLUDE_POWER = 0
+
 # number of retries to attempt when reading device, 0 means retry forever
 READ_RETRIES = 0
 
@@ -1871,6 +1876,10 @@ class GEM48PBinaryPacket(BasePacket):
             for x in range(1, self.NUM_CHAN + 1):
                 c.append('ch%d_aws' % x)
                 c.append('ch%d_pws' % x)
+                if INCLUDE_CURRENT:
+                    c.append('ch%d_a' % x)
+                if INCLUDE_POWER:
+                    c.append('ch%d_w' % x)
             for x in range(1, self.NUM_PULSE + 1):
                 c.append('p%d' % x)
             for x in range(1, self.NUM_SENSE + 1):
@@ -2830,7 +2839,7 @@ class MySQLClient(object):
     def _open_connection(self):
         dbgmsg('MYSQL: opening connection to %s' % self.db_host)
         self.conn = MySQLdb.connect(host=self.db_host,
-        							port=self.db_port,
+                                    port=self.db_port,
                                     user=self.db_user,
                                     passwd=self.db_passwd,
                                     db=self.db_database)
@@ -2889,7 +2898,7 @@ class MySQLConfigurator(MySQLClient):
     def setup(self):
         dbgmsg('MYSQL: opening connection to %s' % self.db_host)
         self.conn = MySQLdb.connect(host=self.db_host,
-        							port=self.db_port,
+                                    port=self.db_port,
                                     user=self.db_user,
                                     passwd=self.db_passwd)
 
@@ -4168,6 +4177,7 @@ if __name__ == '__main__':
     parser.add_option('--utc-device-clock', action='store_true', dest='device_clock_is_utc', default=False, help='device clock is in UTC')
     parser.add_option('--reverse-polarity', default=False, help='reverse polarity on all channels')
     parser.add_option('--include-current', default=False, help='include and process current (amp) values from GEM')
+    parser.add_option('--include-power', default=False, help='include and process power values from GEM')
     parser.add_option('--device-list', help='comma-separated list of device identifiers', metavar='LIST')
     parser.add_option('--full-serials', action='store_true', default=False, help='show full serial numbers instead of XXX123')
 
@@ -4420,6 +4430,8 @@ if __name__ == '__main__':
         infmsg('polarity is reversed')
     if options.include_current:
         INCLUDE_CURRENT = 1
+    if options.include_power:
+        INCLUDE_POWER = 1
     if options.full_serials:
         OBFUSCATE_SERIALS = 0
 
@@ -4540,7 +4552,7 @@ if __name__ == '__main__':
 
     elif options.mysql_read:
         col = MySQLCollector(options.mysql_src_host or DB_HOST,
-        					 options.mysql_src_port or DB_PORT,
+                             options.mysql_src_port or DB_PORT,
                              options.mysql_src_user or DB_USER,
                              options.mysql_src_passwd or DB_PASSWD,
                              options.mysql_src_database or DB_DATABASE,
