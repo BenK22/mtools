@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-__version__ = '3.3.1'
-"""Data collector/processor for Brultech monitoring devices.
+__version__ = '4.0.0'
+"""Data collector/processor for Brultech monitoring devices. Python 3 conversion.
 
 Collect data from Brultech ECM-1240, ECM-1220, and GEM power monitors.  Print
 the data, save the data to database, or upload the data to a server.
