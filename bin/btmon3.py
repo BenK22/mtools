@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-__version__ = '4.0.0'
+__version__ = '4.0.1'
 """Data collector/processor for Brultech monitoring devices. Python 3 conversion.
 
 Collect data from Brultech ECM-1240, ECM-1220, and GEM power monitors.  Print
@@ -9,7 +9,7 @@ Includes support for uploading to the following services:
   * MyEnerSave     * SmartEnergyGroups   * xively         * WattzOn
   * PlotWatt       * PeoplePower         * thingspeak     * Eragy
   * emoncms        * Wattvision          * PVOutput       * Bidgely
-  * MQTT           * InfluxDB
+  * MQTT           * InfluxDB            * InfluxDB2
 
 Thanks to:
   Amit Snyderman <amit@amitsnyderman.com>
@@ -257,7 +257,7 @@ Otherwise, you can run
   pip install influxdb-client
 
 This uses the InfluxDB HTTP API, which by default runs on port 8086. You must
-specify the database and measurement to write to.
+specify the org, bucket, and measurement to write to.
 
 [influxdb2]
 influxdb2_out = true
@@ -4374,6 +4374,18 @@ class InfluxDB2Processor(UploadProcessor):
         self.timeout = int(timeout)
         self.map = dict()
         self.tags = dict()
+        
+        self.client = InfluxDBClient(url = self.url, token = self.token, org = self.org)
+        """
+        Create client that writes data into InfluxDB
+        """
+        self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
+        # Create a bucket if it doesn't exist.
+        try:
+               buckets_api = self.client.buckets_api()
+               buckets_api.create_bucket(bucket = self.bucket, org = self.org)
+        except:
+               pass
 
         if not db_schema:
             self.db_schema = FILTER_DB_SCHEMA_COUNTERS
@@ -4401,6 +4413,10 @@ class InfluxDB2Processor(UploadProcessor):
     def setup(self):
         self.map = pairs2dict(self.map_str)
         self.tags = pairs2dict(self.tag_str)
+    
+    def cleanup(self):
+        self.write_api.close()
+        self.client.close()
 
     def process_calculated(self, packets):
         sensors = dict()
@@ -4432,21 +4448,8 @@ class InfluxDB2Processor(UploadProcessor):
                     values['fields'] = {}
                     values['fields'][value_name] = p[c] * 1.0
                 series.append(values)
-        client = InfluxDBClient(url = self.url, token = self.token, org = self.org)
-        #TODO:  Should close the client at script exit
 
-
-        # Create a bucket if it doesn't exist.  Prefer to only do this once
-        #try:
-        #        buckets_api = client.buckets_api()
-        #        buckets_api.create_bucket(bucket = self.bucket, org = self.org)
-        #except:
-        #        pass
-        """
-        Create client that writes data into InfluxDB
-        """
-        write_api = client.write_api(write_options=SYNCHRONOUS)
-        write_api.write(bucket = self.bucket, record=series, data_frame_tag_columns=self.tags)
+        self.write_api.write(bucket = self.bucket, record=series, data_frame_tag_columns=self.tags)
 
 def ord(s):
     if isinstance(s, (bytes, bytearray)):
