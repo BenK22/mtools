@@ -1,6 +1,6 @@
 FROM python:3-alpine
 
-ENV BTMON_VERSION="4.0.0"
+ENV BTMON_VERSION="4.0.1"
 
 # For a list of pre-defined annotation keys and value types see:
 # https://github.com/opencontainers/image-spec/blob/master/annotations.md
