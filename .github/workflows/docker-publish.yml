@@ -74,7 +74,7 @@ jobs:
         uses: docker/build-push-action@v4.1.1
         with:
           context: .
-          file: docker/build/x86_64/DockerFile
+          file: docker/build/x86_64/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
