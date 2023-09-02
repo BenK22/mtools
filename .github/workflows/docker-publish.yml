@@ -6,8 +6,6 @@ name: Docker
 # documentation.
 
 on:
-  schedule:
-    - cron: $cron-daily
   push:
     branches: [ influxdb ]
     # Publish semver tags as releases.
