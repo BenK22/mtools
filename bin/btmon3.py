@@ -3956,7 +3956,7 @@ class OpenEnergyMonitorProcessor(UploadProcessor):
                 url = '%s?apikey=%s&time=%s%s&json={%s}' % (
                     self.url, self.token, p['time_created'], nstr,
                     ','.join(data))
-                result = self._urlopen(url, '')
+                result = self._urlopen(url, ''.encode('utf-8'))
                 # FIXME: need error handling here
 
     def _create_request(self, url):
