@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-__version__ = '4.0.0'
+__version__ = '4.0.1'
 """Data collector/processor for Brultech monitoring devices. Python 3 conversion.
 
 Collect data from Brultech ECM-1240, ECM-1220, and GEM power monitors.  Print
@@ -1030,7 +1030,8 @@ PF_ECM1220BIN = 'ecm1220bin' # ECM-1220 binary
 PF_ECM1240BIN = 'ecm1240bin' # ECM-1240 binary
 PF_GEM48PTBIN = 'gem48ptbin' # GEM 48-channel binary with polarity, timestamp
 PF_GEM48PBIN = 'gem48pbin'   # GEM 48-channel binary with polarity
-PACKET_FORMATS = [PF_ECM1220BIN, PF_ECM1240BIN, PF_GEM48PTBIN, PF_GEM48PBIN]
+PF_GEM32PBIN = 'gem32pbin'   # GEM 32-channel binary with polarity
+PACKET_FORMATS = [PF_ECM1220BIN, PF_ECM1240BIN, PF_GEM48PTBIN, PF_GEM48PBIN, PF_GEM32PBIN]
 
 # the database schema
 DB_SCHEMA_COUNTERS = 'counters'      # just the counters and sensor readings
@@ -2071,6 +2072,180 @@ class GEM48PTBinaryPacket(GEM48PBinaryPacket):
                 cpkt['time_created'] = int(time.mktime(time_tuple))
 
         return cpkt
+
+
+# GEM binary packet with 32 channels, polarization
+class GEM32PBinaryPacket(BasePacket):
+    def __init__(self):
+        BasePacket.__init__(self)
+        self.NAME = PF_GEM32PBIN
+        self.PACKET_ID = 7
+        self.DATA_BYTES_LENGTH = 423 # does not include the start/end headers
+        self.NUM_CHAN = 32 
+        self.NUM_SENSE = 8
+        self.NUM_PULSE = 4
+
+    def _serialraw(self, packet):
+        sn1 = ord(packet[321:322])
+        sn2 = ord(packet[322:323]) * 256
+        id1 = ord(packet[325:326])
+        return self._fmtserial(id1, sn1 + sn2)
+
+    def _fmtserial(self, gemid, sn):
+        """GEM serial numbers are 8 characters - unit id then serial"""
+        return "%03d%05d" % (gemid, sn)
+
+    def _mktemperature(self, b):
+        # firmware 1.61 and older use this for temperature
+#        t = 0.5 * self._convert(b)
+
+        # firmware later than 1.61 uses this for temperature
+        t = 0.5 * ((b[1] & 0x7f) << 8 | b[0])
+        if (b[1] >> 7) != 0:
+            t = -t
+
+        # check for bogus values that indicate no sensor
+        if t > 255:
+            t = 0   # should be None, but currently no notion of 'no data'
+        return t
+
+    # for now we emit only the first 32 channels.  the additional 16 are not
+    # yet accessible.
+    def channels(self, fltr):
+        c = []
+        if fltr == FILTER_PE_LABELS:
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d' % x)
+        elif fltr == FILTER_CURRENT:
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_a' % x)
+        elif fltr == FILTER_POWER:
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_w' % x)
+        elif fltr == FILTER_ENERGY:
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_wh' % x)
+        elif fltr == FILTER_PULSE:
+            for x in range(1, self.NUM_PULSE + 1):
+                c.append('p%d' % x)
+        elif fltr == FILTER_SENSOR:
+            for x in range(1, self.NUM_SENSE + 1):
+                c.append('t%d' % x)
+        elif fltr == FILTER_DB_SCHEMA_COUNTERS:
+            c = ['volts']
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_aws' % x)
+                c.append('ch%d_pws' % x)
+            for x in range(1, self.NUM_PULSE + 1):
+                c.append('p%d' % x)
+            for x in range(1, self.NUM_SENSE + 1):
+                c.append('t%d' % x)
+        elif fltr == FILTER_DB_SCHEMA_ECMREAD:
+            c = ['volts']
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_a' % x)
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_w' % x)
+        elif fltr == FILTER_DB_SCHEMA_ECMREADEXT:
+            c = ['volts']
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_a' % x)
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_w' % x)
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_wh' % x)
+            for x in range(1, self.NUM_CHAN + 1):
+                c.append('ch%d_dwh' % x)
+            for x in range(1, self.NUM_PULSE + 1):
+                c.append('p%d' % x)
+            for x in range(1, self.NUM_SENSE + 1):
+                c.append('t%d' % x)
+            
+        return c
+
+    def compile(self, rpkt):
+        cpkt = dict()
+
+        # Voltage Data (2 bytes)
+        cpkt['volts'] = 0.1 * self._convert(rpkt[1::-1])
+
+        # Absolute/Polarized Watt-Second Counters (5 bytes each)
+        for x in range(1, self.NUM_CHAN+1):
+            cpkt['ch%d_aws' % x] = self._convert(rpkt[2+5*(x-1):2+5*x])
+            cpkt['ch%d_pws' % x] = self._convert(rpkt[162+5*(x-1):162+5*x])
+
+        # Device Serial Number (2 bytes)
+        cpkt['ser_no'] = self._convert(rpkt[323:321:-1])
+
+        # Reserved (1 byte)
+
+        # Device Information (1 byte)
+        cpkt['unit_id'] = self._convert(rpkt[325:326])
+
+        # Current (2 bytes each)
+        if INCLUDE_CURRENT:
+            for x in range(1, self.NUM_CHAN+1):
+                cpkt['ch%d_a' % x] = 0.02 * self._convert(rpkt[326+2*(x-1):326+2*x])
+
+        # Seconds (3 bytes)
+        cpkt['secs'] = self._convert(rpkt[390:393])
+
+        # Pulse Counters (3 bytes each)
+        for x in range(1, self.NUM_PULSE + 1):
+            cpkt['p%d' % x] = self._convert(rpkt[393+3*(x-1):393+3*x])
+
+        # One-Wire Sensors (2 bytes each)
+        # the 0.5 multiplier is for DS18B20 sensors
+#        for x in range(1,self.NUM_SENSE+1):
+#            cpkt['t%d' % x] = 0.5 * self._convert(rpkt[597+2*(x-1):597+2*x])
+        for x in range(1, self.NUM_SENSE + 1):
+            cpkt['t%d' % x] = self._mktemperature(rpkt[405+2*(x-1):405+2*x])
+
+        # Footer (2 bytes)
+
+        # Add the current time as the timestamp
+        cpkt['time_created'] = getgmtime()
+
+        # Add a formatted serial number
+        cpkt['serial'] = self._getserial(cpkt)
+
+        return cpkt
+
+    def calculate(self, now, prev):
+        """calculate watts and watt-hours from watt-second counters"""
+
+        # FIXME: check the reset flag once that is supported in gem packets
+        # until then, if counter drops we assume it is due to a reset
+        for x in range(1, self.NUM_CHAN + 1):
+            tag = 'ch%d' % x
+            c0 = prev[tag + '_aws']
+            c1 = now[tag + '_aws']
+            if c1 < c0:
+                raise CounterResetError("channel: %s old: %d new: %d" %
+                                        (tag, c0, c1))
+
+        ret = now
+        ds = self._calc_secs(ret, prev)
+        for x in range(1, self.NUM_CHAN + 1):
+            tag = 'ch%d' % x
+            self._calc_pe(tag, ds, ret, prev)
+
+        return ret
+
+    def printPacket(self, p):
+        ts = fmttime(time.localtime(p['time_created']))
+
+        print((ts+": Serial: %s" % p['serial']))
+        print((ts+": Voltage: % 6.2fV" % p['volts']))
+        for x in range(1, self.NUM_CHAN + 1):
+            if INCLUDE_CURRENT:
+                print((ts+": Ch%02d: % 13.6fKWh (% 5dW) (% 7.2fA)" % (x, p['ch%d_wh' % x]/1000, p['ch%d_w' % x], p['ch%d_a' % x])))
+            else:
+                print((ts+": Ch%02d: % 13.6fKWh (% 5dW)" % (x, p['ch%d_wh' % x]/1000, p['ch%d_w' % x])))
+        for x in range(1, self.NUM_PULSE + 1):
+            print((ts+": p%d: % 15d" % (x, p['p%d' % x])))
+        for x in range(1, self.NUM_SENSE + 1):
+            print((ts+": t%d: % 15.6f" % (x, p['t%d' % x])))
 
 
 # The schema classes encapsulate the structure for saving data to and reading
@@ -4640,6 +4815,8 @@ if __name__ == '__main__':
         PACKET_FORMAT = GEM48PTBinaryPacket()
     elif options.packet_format == PF_GEM48PBIN:
         PACKET_FORMAT = GEM48PBinaryPacket()
+    elif options.packet_format == PF_GEM32PBIN:
+        PACKET_FORMAT = GEM32PBinaryPacket()
     else:
         print(("Unsupported packet format '%s'" % options.packet_format))
         print ('supported formats include:')
