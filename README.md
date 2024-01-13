@@ -1,3 +1,4 @@
+[![Docker](https://github.com/jordandahlke/mtools/actions/workflows/docker-publish.yml/badge.svg?branch=influxdb)](https://github.com/jordandahlke/mtools/actions/workflows/docker-publish.yml)
 <h1>mtools</h1>
 
 Tools to configure and read data from various sensing devices, then
