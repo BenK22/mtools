@@ -3457,8 +3457,8 @@ if __name__ == '__main__':
     parser.add_option('--buffer-size', help='number of packets to keep in cache', metavar='SIZE')
     parser.add_option('--trust-device-clock', action='store_true', default=False, help='use device clock for packet timestamps')
     parser.add_option('--utc-device-clock', action='store_true', dest='device_clock_is_utc', default=False, help='device clock is in UTC')
-    parser.add_option('--reverse-polarity', default=False, help='reverse polarity on all channels')
-    parser.add_option('--include-current', default=False, help='include and process current (amp) values from GEM')
+    parser.add_option('--reverse-polarity', action='store_true', default=False, help='reverse polarity on all channels')
+    parser.add_option('--include-current', action='store_true', default=False, help='include and process current (amp) values from GEM')
     parser.add_option('--device-list', help='comma-separated list of device identifiers', metavar='LIST')
     parser.add_option('--full-serials', action='store_true', default=False, help='show full serial numbers instead of XXX123')
 
