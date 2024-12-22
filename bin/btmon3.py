@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 __version__ = '4.0.1'
 """Data collector/processor for Brultech monitoring devices. Python 3 conversion.
 
