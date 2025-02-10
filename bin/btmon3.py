@@ -8,6 +8,7 @@ the data, save the data to database, or upload the data to a server.
 Includes support for uploading to the following services:
   * thingspeak     * emoncms        * Wattvision      
   * PVOutput       * MQTT           * InfluxDB
+  * InfluxDB2
 
 Thanks to:
   Amit Snyderman <amit@amitsnyderman.com>
@@ -211,7 +212,7 @@ computer reading/writing to a very slow usb drive, a single update takes about
 
 InfluxDB Configuration:
 
-Connections to InfluxDB require the InfluxDB-Python client. On Debian/Ubuntu,
+Connections to InfluxDB 1.7 or earlier require the InfluxDB-Python client. On Debian/Ubuntu,
 you can install it with
 
   apt-get install python-influxdb
@@ -237,6 +238,32 @@ influxdb_map = 1234567_ch1_aws,a,1234567_ch2_aws,b  # renames channels
 influxdb_tags = key1,value1,key2,value2             # adds tags
 influxdb_db_schema = counters,ecmread,ecmreadext       # selects schema, default counters
 
+InfluxDB2 Configuration:
+
+Connections to InfluxDB 2.x and InfluxDB 1.8+ require the InfluxDB-Python client. On Debian/Ubuntu,
+you can install it with
+
+  apt-get install influxdb-client-python
+
+Otherwise, you can run
+
+  pip install influxdb-client
+
+This uses the InfluxDB HTTP API, which by default runs on port 8086. You must
+specify the org, bucket, and measurement to write to.
+
+[influxdb2]
+influxdb2_out = true
+influxdb2_url = localhost:8086                       # default
+influxdb2_upload_period = 60                         # default
+influxdb2_org = abcde                                # required
+influxdb2_bucket = btmon                             # required
+influxdb2_token = token                              # required
+influxdb2_measurement = energy                       # required
+influxdb2_mode = row                                 # "row": 1 series w/ many values; "col": many series w/ 1 value each
+influxdb2_map = 1234567_ch1_aws,a,1234567_ch2_aws,b  # renames channels
+influxdb2_tags = key1,value1,key2,value2             # adds tags
+influxdb2_db_schema = counters,ecmread,ecmreadext    # selects schema, default counters
 
 OpenEnergyMonitor Configuration:
 
@@ -845,6 +872,21 @@ INFLUXDB_MAP = ''
 INFLUXDB_TAG_MAP = ''
 INFLUXDB_DB_SCHEMA = FILTER_DB_SCHEMA_COUNTERS
 
+# InfluxDB2 defaults
+#   Minimum upload interval is 60 seconds.
+#   Recommended sampling interval is 2 to 30 seconds.
+INFLUXDB_V2_URL = 'http://localhost:8086'
+INFLUXDB_V2_UPLOAD_PERIOD = 1 * MINUTE
+INFLUXDB_V2_TIMEOUT = 60 # seconds
+INFLUXDB_V2_ORG = ''
+INFLUXDB_V2_TOKEN = ''
+INFLUXDB_V2_BUCKET = ''
+INFLUXDB_V2_MEASUREMENT = ''
+INFLUXDB_V2_MODE = 'col'
+INFLUXDB_V2_MAP = ''
+INFLUXDB_V2_TAG_MAP = ''
+INFLUXDB_V2_DB_SCHEMA = FILTER_DB_SCHEMA_COUNTERS
+
 import base64
 import bisect
 import calendar
@@ -906,6 +948,12 @@ except ImportError:
 
 try:
     from influxdb import InfluxDBClient
+except ImportError:
+    InfluxDBClient = None
+
+try:
+    from influxdb_client import InfluxDBClient, WriteApi, WriteOptions
+    from influxdb_client.client.write_api import SYNCHRONOUS
 except ImportError:
     InfluxDBClient = None
 
@@ -3439,6 +3487,98 @@ class InfluxDBProcessor(UploadProcessor):
                 pass
         client.write_points(series, tags=self.tags)
 
+class InfluxDB2Processor(UploadProcessor):
+    def __init__(self, url, org, bucket, token, mode, measurement, map_str, tag_str, period, timeout, db_schema):
+        super(InfluxDB2Processor, self).__init__()
+        self.url = url
+        self.org = org
+        self.bucket = bucket
+        self.token = token
+        self.mode = mode
+        self.measurement = measurement
+        self.map_str = map_str
+        self.tag_str = tag_str
+        self.process_period = int(period)
+        self.timeout = int(timeout)
+        self.map = dict()
+        self.tags = dict()
+        
+        self.client = InfluxDBClient(url = self.url, token = self.token, org = self.org)
+        """
+        Create client that writes data into InfluxDB
+        """
+        self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
+        # Create a bucket if it doesn't exist.
+        try:
+               buckets_api = self.client.buckets_api()
+               buckets_api.create_bucket(bucket = self.bucket, org = self.org)
+        except:
+               pass
+
+        if not db_schema:
+            self.db_schema = FILTER_DB_SCHEMA_COUNTERS
+        elif db_schema == DB_SCHEMA_COUNTERS:
+            self.db_schema = FILTER_DB_SCHEMA_COUNTERS
+        elif db_schema == DB_SCHEMA_ECMREAD:
+            self.db_schema = FILTER_DB_SCHEMA_ECMREAD
+        elif db_schema == DB_SCHEMA_ECMREADEXT:
+            self.db_schema = FILTER_DB_SCHEMA_ECMREADEXT
+        else:
+            print(("Unsupported database schema '%s'" % db_schema))
+            print ('supported schemas include:')
+            for fmt in DB_SCHEMAS:
+                print(('  %s' % fmt))
+            sys.exit(1)
+
+
+        infmsg('InfluxDB2: upload period: %d' % self.process_period)
+        infmsg('InfluxDB2: url: %s' % self.url)
+        infmsg('InfluxDB2: org: %s' % self.org)
+        infmsg('InfluxDB2: bucket: %s' % self.bucket)
+        infmsg('InfluxDB2: map: %s' % self.map_str)
+        infmsg('InfluxDB2: schema: %s' % self.db_schema)
+
+    def setup(self):
+        self.map = pairs2dict(self.map_str)
+        self.tags = pairs2dict(self.tag_str)
+    
+    def cleanup(self):
+        self.write_api.close()
+        self.client.close()
+
+    def process_calculated(self, packets):
+        sensors = dict()
+        readings = dict()
+        series = []
+        for p in packets:
+            dev_serial = obfuscate_serial(p['serial'])
+            for c in PACKET_FORMAT.channels(self.db_schema):
+                ch = c.split('_')
+                unit = ch[-1]
+                key = mklabel(p['serial'], ch[0])
+                if self.map and key not in self.map:
+                    continue
+                values = {
+                    "measurement": self.measurement,
+                    "time": mkts(p['time_created']),
+                }
+                if self.mode == 'col':
+                    values['tags'] = {
+                       "serial": dev_serial
+                    }
+                    if len(ch)>1:
+                        values['tags']['id'] = self.map[key] if key in self.map else ch[0]
+                    values['fields'] = {}
+                    values['fields'][unit] = p[c] * 1.0
+
+                else:
+                    value_name = self.map[key] if key in self.map else mklabel(dev_serial, c)
+                    values['fields'] = {}
+                    values['fields'][value_name] = p[c] * 1.0
+                series.append(values)
+
+        self.write_api.write(bucket = self.bucket, record=series, data_frame_tag_columns=self.tags)
+
 def ord(s):
     if isinstance(s, (bytes, bytearray)):
         return int.from_bytes(s, "big")
@@ -3606,6 +3746,20 @@ if __name__ == '__main__':
     group.add_option('--influxdb-upload-period', help='upload period in seconds', metavar='PERIOD')
     group.add_option('--influxdb-timeout', help='timeout period in seconds', metavar='TIMEOUT')
     group.add_option('--influxdb-db-schema', help='selected database schema', metavar='DB_SCHEMA')
+
+    group = optparse.OptionGroup(parser, 'InfluxDB2 options')
+    group.add_option('--influxdb2', action='store_true', dest='influxdb2_out', default=False, help='upload data to InfluxBD')
+    group.add_option('--influxdb2-org', help='organization', metavar='ORGANIZATION')
+    group.add_option('--influxdb2-token', help='token', metavar='TOKEN')
+    group.add_option('--influxdb2-url', help='URL', metavar='URL')
+    group.add_option('--influxdb2-bucket', help='BUCKET', metavar='BUCKET')
+    group.add_option('--influxdb2-mode', choices=['row', 'col'], help='row (1 series w/ many values) or col (many series w/ 1 value each)', metavar='MODE')
+    group.add_option('--influxdb2-measurement', help='MEASUREMENT', metavar='MEASUREMENT')
+    group.add_option('--influxdb2-map', help='channel-to-device mapping', metavar='MAP')
+    group.add_option('--influxdb2-tags', help='map of shared tags to add (a,b,c,d adds tag a with value b, tag c with value d)', metavar='MAP')
+    group.add_option('--influxdb2-upload-period', help='upload period in seconds', metavar='PERIOD')
+    group.add_option('--influxdb2-timeout', help='timeout period in seconds', metavar='TIMEOUT')
+    group.add_option('--influxdb2-db-schema', help='selected database schema', metavar='DB_SCHEMA')
     parser.add_option_group(group)
 
     (options, args) = parser.parse_args()
@@ -3799,17 +3953,17 @@ if __name__ == '__main__':
     if not (options.print_out or options.mysql_out or options.sqlite_out or
             options.rrd_out or options.thingspeak_out or options.oem_out or
             options.wattvision_out or options.pvo_out or options.mqtt_out or
-            options.influxdb_out):
+            options.influxdb_out or options.influxdb2_out):
         print ('Please specify one or more processing options (or \'-h\' for help):')
         print ('  --print (             print (to screen')
         print ('  --mysql              write to mysql database')
         print ('  --sqlite             write to sqlite database')
         print ('  --rrd                write to round-robin database')
         print ('  --influxdb           write to influxdb database')
+        print ('  --influxdb2          write to influxdb2 database')
         print ('  --mqtt               upload to MQTT broker')
         print ('  --oem                upload to OpenEnergyMonitor')
         print ('  --pvo                upload to PVOutput')
-        print ('  --thingspeak         upload to ThingSpeak')
         print ('  --wattvision         upload to Wattvision')
         sys.exit(1)
 
@@ -3901,6 +4055,22 @@ if __name__ == '__main__':
                       options.influxdb_upload_period or INFLUXDB_UPLOAD_PERIOD,
                       options.influxdb_timeout or INFLUXDB_TIMEOUT,
                       options.influxdb_db_schema or INFLUXDB_DB_SCHEMA))
+    if options.influxdb2_out:
+        if not InfluxDBClient:
+            print ('InfluxDBClient not loaded, cannot write to InfluxDB2')
+            sys.exit(1)
+        procs.append(InfluxDB2Processor
+                     (options.influxdb2_url or INFLUXDB_V2_URL,
+                      options.influxdb2_org or INFLUXDB_V2_ORG,
+                      options.influxdb2_bucket or INFLUXDB_V2_BUCKET,
+                      options.influxdb2_token or INFLUXDB_V2_TOKEN,
+                      options.influxdb2_mode or INFLUXDB_V2_MODE,
+                      options.influxdb2_measurement or INFLUXDB_V2_MEASUREMENT,
+                      options.influxdb2_map or INFLUXDB_V2_MAP,
+                      options.influxdb2_tags or INFLUXDB_V2_TAG_MAP,
+                      options.influxdb2_upload_period or INFLUXDB_V2_UPLOAD_PERIOD,
+                      options.influxdb2_timeout or INFLUXDB_V2_TIMEOUT,
+                      options.influxdb2_db_schema or INFLUXDB_V2_DB_SCHEMA))
 
     mon = Monitor(col, procs)
     mon.run()

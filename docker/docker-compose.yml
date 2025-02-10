@@ -1,0 +1,10 @@
+version: '3.4'
+services:
+  btmon:
+    image: jdahlke/btmon3:latest
+    container_name: btmon
+    restart: always
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      ## Adjust below paths (the left part) to your liking.
+      - appdata/btmon/btmon.cfg:/etc/btmon/btmon.cfg

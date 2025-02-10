@@ -1,3 +1,4 @@
+[![Docker](https://github.com/jordandahlke/mtools/actions/workflows/docker-publish.yml/badge.svg?branch=influxdb)](https://github.com/jordandahlke/mtools/actions/workflows/docker-publish.yml)
 <h1>mtools</h1>
 
 Tools to configure and read data from various sensing devices, then
@@ -8,16 +9,17 @@ Copyright: Matthew Wall, all rights reserved
 License: GPLv3
 
 Pre-Requisites:
-- Python 2.6 or 2.7 (Python 3 is not supported)
+- Python 3
 - python-serial (required for serial connections)
 - python-mysqldb (required if saving to mysql database)
 - python-sqlite3 (required if saving to sqlite database)
 - python-rrdtool (required if saving to round-robin database)
+- influxdb-client (required if saving to influxdb2 database)
 
 
 <h2>brultech power monitors</h2>
 
-btmon.py - read data from ecm-1220, ecm-1240, or green-eye device
+btmon3.py - read data from ecm-1220, ecm-1240, or green-eye device
 
 btcfg.py - configure the green-eye monitor
 
