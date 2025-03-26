@@ -378,6 +378,17 @@ pvo_consumption_channel = 399999_ch2
 pvo_temperature_channel = 399999_t1
 
 
+VIC (Victoria Metrics) Configuration:
+
+Defaults to the host being "localhost", the port 8243, and imports issued once
+a minute.
+
+[vic]
+vic_import_period = 60
+vic_host = "localhost"
+vic_port = "8243"
+
+
 MQTT Configuration:
 
 1) setup an mqtt server, like mosquitto
@@ -841,6 +852,12 @@ PVO_GEN_CHANNEL = ''
 PVO_CON_CHANNEL = ''
 PVO_TEMP_CHANNEL = ''
 
+# Victoria Metrics defaults
+# e.g. curl -X POST http://127.0.0.1:8428/api/v1/import -T <data file>
+VIC_HOST = 'localhost'
+VIC_PORT = '8428'
+VIC_IMPORT_PERIOD = MINUTE
+
 # MQTT defaults
 #   Recommended upload period matches the sample period.  If set slower
 #   than the sample period, batches of un-timestamped mqtt messages
@@ -898,7 +915,6 @@ import sys
 import time
 import traceback
 import urllib.request, urllib.parse, urllib.error
-import urllib.request, urllib.error, urllib.parse
 import binascii
 import warnings
 from functools import reduce
@@ -2987,7 +3003,6 @@ class UploadProcessor(BaseProcessor):
         self.process_period = DEFAULT_UPLOAD_PERIOD
         self.timeout = DEFAULT_UPLOAD_TIMEOUT
         self.urlopener = None
-        pass
 
     def setup(self):
         pass
@@ -3033,6 +3048,7 @@ class UploadProcessor(BaseProcessor):
         errmsg(''.join(['%s Error: %s' % (self.__class__.__name__, e),
                         '\n  URL:  ' + url,
                         '\n  data: ' + data]))
+
 
 class ThingSpeakProcessor(UploadProcessor):
     def __init__(self, url, tokens, fields, period, timeout):
@@ -3085,6 +3101,7 @@ class ThingSpeakProcessor(UploadProcessor):
                         wrnmsg('TS: upload failed for %s' % ecm_serial)
             else:
                 wrnmsg('TS: no token defined for %s' % ecm_serial)
+
 
 class OpenEnergyMonitorProcessor(UploadProcessor):
     def __init__(self, url, token, node, period, timeout):
@@ -3307,6 +3324,123 @@ class PVOutputProcessor(UploadProcessor):
                         '\n  api_key: ' + self.api_key,
                         '\n  system_id: ' + self.system_id,
                         '\n  data:  ' + payload]))
+
+
+class VictoriaMetricsProcessor(UploadProcessor):
+    def __init__(self, period, host, port):
+        super(VictoriaMetricsProcessor, self).__init__()
+        self.process_period = period
+        self.host = host
+        self.port = port
+        self._url = f'http://{host}:{port}/api/v1/import'
+        infmsg(f'VIC: import period: {self.process_period:d}')
+        infmsg(f'VIC: import API URL: {self._url}')
+
+    def process_calculated(self, packets):
+        '''Process each packet building up an array of values for each metric
+        so that a single line of JSON, one per metric, is send to a Victoria
+        Metrics instance.
+        '''
+        # Below is the JSONL format for payload of the `/api/v1/import` API.
+        # Each metric JSON object will result contain all of the time series
+        # data for that metric from each packet processed.
+        #
+        # From https://docs.victoriametrics.com/#json-line-format:
+        #   {
+        #     // metric contains metric name plus labels for a particular time
+        #     // series
+        #     "metric":{
+        #       "__name__": "metric_name",  // <- this is metric name
+        #
+        #       // Other labels for the time series
+        #       "label1": "value1",
+        #       "label2": "value2",
+        #       ...
+        #       "labelN": "valueN"
+        #     },
+        #
+        #     // values contains raw sample values for the given time series
+        #     "values": [1, 2.345, -678],
+        #
+        #     // timestamps contains raw sample UNIX timestamps in
+        #     // milliseconds for the given time series every timestamp is
+        #     // associated with the value at the corresponding position
+        #     "timestamps": [1549891472010,1549891487724,1549891503438]
+        #   }
+        metrics = {}
+        for p in packets:
+            ts_ms = p['time_created'] * 1000
+            # Labels
+            serial_l = p.get('serial', None)
+            ser_no_l = p.get('ser_no', None)
+            unit_id_l = p.get('unit_id', None)
+            # Common metric
+            for metric, value in p.items():
+                if metric in (
+                        'time_created', 'serial', 'ser_no', 'unit_id', 'secs',
+                        'year', 'mth', 'day', 'hr', 'min', 'sec'):
+                    # Ignore all labels
+                    continue
+                if metric not in metrics:
+                    metrics[metric] = {
+                        "metric": {
+                            "__name__": metric
+                        },
+                        "timestamps": [],
+                        "values": []
+                    }
+                    if serial_l:
+                        metrics[metric]["metric"]["serial"] = serial_l
+                    if ser_no_l:
+                        metrics[metric]["metric"]["ser_no"] = ser_no_l
+                    if unit_id_l:
+                        metrics[metric]["metric"]["unit_id"] = unit_id_l
+                    if metric.startswith('t'):
+                        metrics[metric]["metric"]["class"] = "temperature"
+                    if metric.startswith('p'):
+                        metrics[metric]["metric"]["class"] = "pulse"
+                    if metric.endswith('volts'):
+                        metrics[metric]["metric"]["class"] = "volts"
+                    if metric.startswith('ch'):
+                        metrics[metric]["metric"]["class"] = "channel"
+                        if metric.endswith('_a'):
+                            metrics[metric]["metric"]["subclass"] = "amps"
+                        if metric.endswith('_w'):
+                            metrics[metric]["metric"]["subclass"] = "watts"
+                        if metric.endswith('_wh'):
+                            metrics[metric]["metric"]["subclass"] = "watt-hours"
+                        if metric.endswith('_dwh'):
+                            metrics[metric]["metric"]["subclass"] = "delta-watt-hours"
+                        if metric.endswith('_ws'):
+                            metrics[metric]["metric"]["subclass"] = "watt-secs"
+                        if metric.endswith('_aws'):
+                            metrics[metric]["metric"]["subclass"] = "abs-watt-secs"
+                        if metric.endswith('_pws'):
+                            metrics[metric]["metric"]["subclass"] = "pol-watt-secs"
+                        if metric.endswith('_nw'):
+                            metrics[metric]["metric"]["subclass"] = "neg-watts"
+                        if metric.endswith('_nwh'):
+                            metrics[metric]["metric"]["subclass"] = "neg-watt-hours"
+                        if metric.endswith('_pw'):
+                            metrics[metric]["metric"]["subclass"] = "pos-watts"
+                        if metric.endswith('_pwh'):
+                            metrics[metric]["metric"]["subclass"] = "pos-watt-hours"
+                metrics[metric]["timestamps"].append(ts_ms)
+                metrics[metric]["values"].append(value)
+            if LOGLEVEL >= LOG_WARN:
+                if serial_l and metrics[metric]["metric"]["serial"] != serial_l:
+                    orig_l = metrics[metric]["metric"]["serial"]
+                    logmsg("VIC Warning: 'serial' label value changed, orig: {orig_l}, new: {serial_l}")
+                if ser_no_l and metrics[metric]["metric"]["ser_no"] != ser_no_l:
+                    orig_l = metrics[metric]["metric"]["ser_no"]
+                    logmsg("VIC Warning: 'serial' label value changed, orig: {orig_l}, new: {ser_no_l}")
+                if unit_id_l and metrics[metric]["metric"]["unit_id"] != unit_id_l:
+                    orig_l = metrics[metric]["metric"]["unit_id"]
+                    logmsg("VIC Warning: 'serial' label value changed, orig: {orig_l}, new: {unit_id_l}")
+        json_l = []
+        for metric in sorted(metrics.keys()):
+            json_l.append(json.dumps(metrics[metric]))
+        self._urlopen(self._url, '\n'.join(json_l).encode('utf-8'))
 
 
 class MQTTProcessor(BaseProcessor):
@@ -3717,6 +3851,13 @@ if __name__ == '__main__':
     group.add_option('--pvo-timeout', help='timeout period in seconds', metavar='TIMEOUT')
     parser.add_option_group(group)
 
+    group = optparse.OptionGroup(parser, 'Victoria Metrics options')
+    group.add_option('--vic', action='store_true', dest='vic_out', default=False, help='upload data using Victoria Metrics API')
+    group.add_option('--vic-import-period', help='import API period in seconds', metavar='PERIOD')
+    group.add_option('--vic-host', help='host', metavar='HOST')
+    group.add_option('--vic-port', help='port', metavar='PORT')
+    parser.add_option_group(group)
+
     group = optparse.OptionGroup(parser, 'MQTT options')
     group.add_option('--mqtt', action='store_true', dest='mqtt_out', default=False, help='upload data using MQTT API')
     group.add_option('--mqtt-host', help='mqtt host', metavar='HOSTNAME')
@@ -3952,8 +4093,8 @@ if __name__ == '__main__':
     # Packet Processor Setup
     if not (options.print_out or options.mysql_out or options.sqlite_out or
             options.rrd_out or options.thingspeak_out or options.oem_out or
-            options.wattvision_out or options.pvo_out or options.mqtt_out or
-            options.influxdb_out or options.influxdb2_out):
+            options.wattvision_out or options.pvo_out or options.vic_out or
+            options.mqtt_out or options.influxdb_out or options.influxdb2_out):
         print ('Please specify one or more processing options (or \'-h\' for help):')
         print ('  --print              print to screen')
         print ('  --mysql              write to mysql database')
@@ -3964,6 +4105,7 @@ if __name__ == '__main__':
         print ('  --mqtt               upload to MQTT broker')
         print ('  --oem                upload to OpenEnergyMonitor')
         print ('  --pvo                upload to PVOutput')
+        print ('  --vic                upload to Victoria Metrics')
         print ('  --wattvision         upload to Wattvision')
         sys.exit(1)
 
@@ -4024,6 +4166,11 @@ if __name__ == '__main__':
                       options.pvo_temperature_channel or PVO_TEMP_CHANNEL,
                       options.pvo_upload_period or PVO_UPLOAD_PERIOD,
                       options.pvo_timeout or PVO_TIMEOUT))
+    if options.vic_out:
+        procs.append(VictoriaMetricsProcessor
+                     (options.vic_import_period or VIC_IMPORT_PERIOD,
+                      options.vic_host or VIC_HOST,
+                      options.vic_port or VIC_PORT))
     if options.mqtt_out:
         procs.append(MQTTProcessor
                      (options.mqtt_host or MQTT_HOST,
