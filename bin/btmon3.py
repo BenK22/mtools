@@ -3955,7 +3955,7 @@ if __name__ == '__main__':
             options.wattvision_out or options.pvo_out or options.mqtt_out or
             options.influxdb_out or options.influxdb2_out):
         print ('Please specify one or more processing options (or \'-h\' for help):')
-        print ('  --print (             print (to screen')
+        print ('  --print              print to screen')
         print ('  --mysql              write to mysql database')
         print ('  --sqlite             write to sqlite database')
         print ('  --rrd                write to round-robin database')
