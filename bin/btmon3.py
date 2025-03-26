@@ -6,7 +6,7 @@ Collect data from Brultech ECM-1240, ECM-1220, and GEM power monitors.  Print
 the data, save the data to database, or upload the data to a server.
 
 Includes support for uploading to the following services:
-  * thingspeak     * emoncms        * Wattvision      
+  * thingspeak     * emoncms        * Wattvision
   * PVOutput       * MQTT           * InfluxDB
   * InfluxDB2
 
@@ -1193,7 +1193,7 @@ class BasePacket(object):
         if not data:
             raise EmptyReadError("expected %s %s, got nothing" %
                                  (label, hex(evalue)))
-       
+
         b = ord(data)
         if b != evalue:
             raise ReadError("expected %s %s, got %s" %
@@ -1214,7 +1214,7 @@ class BasePacket(object):
             data = collector.readbytes(pktlen - len(packet))
             if not data: # No data left
                 raise ReadError('no data after %d bytes' % len(packet))
-                        
+
             packet += data
 
         if len(packet) < pktlen:
@@ -1225,7 +1225,7 @@ class BasePacket(object):
         self._checkbyte(data, 'END_HEADER0', self.END_HEADER0)
         data = collector.readbytes(1)
         self._checkbyte(data, 'END_HEADER1', self.END_HEADER1)
-        
+
         pkt = [c for c in packet]
 
         # if the checksum is incorrect, ignore the packet
@@ -1591,7 +1591,7 @@ class GEM48PBinaryPacket(BasePacket):
                 c.append('p%d' % x)
             for x in range(1, self.NUM_SENSE + 1):
                 c.append('t%d' % x)
-            
+
         return c
 
     def compile(self, rpkt):
@@ -1720,7 +1720,7 @@ class GEM32PBinaryPacket(BasePacket):
         self.NAME = PF_GEM32PBIN
         self.PACKET_ID = 7
         self.DATA_BYTES_LENGTH = 423 # does not include the start/end headers
-        self.NUM_CHAN = 32 
+        self.NUM_CHAN = 32
         self.NUM_SENSE = 8
         self.NUM_PULSE = 4
 
@@ -1799,7 +1799,7 @@ class GEM32PBinaryPacket(BasePacket):
                 c.append('p%d' % x)
             for x in range(1, self.NUM_SENSE + 1):
                 c.append('t%d' % x)
-            
+
         return c
 
     def compile(self, rpkt):
@@ -3387,7 +3387,7 @@ class MQTTProcessor(BaseProcessor):
             for f in [FILTER_POWER, FILTER_ENERGY, FILTER_PULSE, FILTER_SENSOR]:
                 for c in PACKET_FORMAT.channels(f):
                     self._add_msg(p, c, p[c])
-            
+
             # Current
             if INCLUDE_CURRENT:
                 for f in [FILTER_CURRENT]:
@@ -3425,7 +3425,7 @@ class InfluxDBProcessor(UploadProcessor):
         self.timeout = int(timeout)
         self.map = dict()
         self.tags = dict()
-		
+
         if not db_schema:
             self.db_schema = FILTER_DB_SCHEMA_COUNTERS
         elif db_schema == DB_SCHEMA_COUNTERS:
@@ -3440,7 +3440,7 @@ class InfluxDBProcessor(UploadProcessor):
             for fmt in DB_SCHEMAS:
                 print(('  %s' % fmt))
             sys.exit(1)
-		
+
 
         infmsg('InfluxDB: upload period: %d' % self.process_period)
         infmsg('InfluxDB: host: %s' % self.host)
@@ -3502,7 +3502,7 @@ class InfluxDB2Processor(UploadProcessor):
         self.timeout = int(timeout)
         self.map = dict()
         self.tags = dict()
-        
+
         self.client = InfluxDBClient(url = self.url, token = self.token, org = self.org)
         """
         Create client that writes data into InfluxDB
@@ -3541,7 +3541,7 @@ class InfluxDB2Processor(UploadProcessor):
     def setup(self):
         self.map = pairs2dict(self.map_str)
         self.tags = pairs2dict(self.tag_str)
-    
+
     def cleanup(self):
         self.write_api.close()
         self.client.close()
